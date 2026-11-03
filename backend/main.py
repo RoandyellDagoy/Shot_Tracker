@@ -3,13 +3,40 @@ from typing import List, Optional, Dict, Any
 import os
 import sqlite3
 import json
-import math
+import urllib.request
+import urllib.parse
+import urllib.error
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+
+# Load .env file automatically if present in root or backend directory
+for env_candidate in [
+    Path(__file__).resolve().parent.parent / ".env",
+    Path(__file__).resolve().parent / ".env",
+]:
+    if env_candidate.exists():
+        for line in env_candidate.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/").removesuffix("/rest/v1")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+
+USE_SUPABASE = bool(
+    SUPABASE_URL
+    and SUPABASE_KEY
+    and "your-project-id" not in SUPABASE_URL
+    and "your-supabase" not in SUPABASE_KEY
+)
 
 app = FastAPI(
     title="HoopsVision AI - Shot & Biomechanics Analytics API",
@@ -28,6 +55,35 @@ app.add_middleware(
 DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).parent / "shots.db")))
 
 
+def supabase_request(
+    method: str,
+    path: str,
+    body: Optional[Any] = None,
+    prefer: str = "return=representation",
+) -> Any:
+    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Content-Type": "application/json",
+        "Prefer": prefer,
+    }
+    # Legacy JWT keys start with 'eyJ' and use Bearer auth; new 'sb_publishable_' / 'sb_secret_' keys use 'apikey' header
+    if SUPABASE_KEY.startswith("eyJ"):
+        headers["Authorization"] = f"Bearer {SUPABASE_KEY}"
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else []
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="ignore")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Supabase error ({e.code}): {err_body}",
+        )
+
+
 def get_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -36,49 +92,54 @@ def get_db():
 
 
 def init_db():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            court_zone_default TEXT DEFAULT 'Top of Key 3',
-            shooting_hand TEXT DEFAULT 'Right',
-            created_at TEXT NOT NULL,
-            notes TEXT DEFAULT ''
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS shots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER NOT NULL,
-            made INTEGER NOT NULL,
-            court_zone TEXT NOT NULL,
-            elbow_angle REAL,
-            release_angle REAL,
-            knee_angle REAL,
-            follow_through_ms INTEGER,
-            form_score REAL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
-        )
-        """
-    )
-    conn.commit()
-
-    # Create a clean empty starter session if DB has no sessions yet (0 shots)
-    cur.execute("SELECT COUNT(*) as cnt FROM sessions")
-    if cur.fetchone()["cnt"] == 0:
-        now = datetime.utcnow().isoformat()
+    if USE_SUPABASE:
+        return
+    try:
+        conn = get_db()
+        cur = conn.cursor()
         cur.execute(
-            "INSERT INTO sessions (title, court_zone_default, shooting_hand, created_at, notes) VALUES (?, ?, ?, ?, ?)",
-            ("My Shooting Session #1", "Top of Key 3", "Right", now, ""),
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                court_zone_default TEXT DEFAULT 'Top of Key 3',
+                shooting_hand TEXT DEFAULT 'Right',
+                created_at TEXT NOT NULL,
+                notes TEXT DEFAULT ''
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                made INTEGER NOT NULL,
+                court_zone TEXT NOT NULL,
+                elbow_angle REAL,
+                release_angle REAL,
+                knee_angle REAL,
+                follow_through_ms INTEGER,
+                form_score REAL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+            )
+            """
         )
         conn.commit()
-    conn.close()
+
+        cur.execute("SELECT COUNT(*) as cnt FROM sessions")
+        if cur.fetchone()["cnt"] == 0:
+            now = datetime.utcnow().isoformat()
+            cur.execute(
+                "INSERT INTO sessions (title, court_zone_default, shooting_hand, created_at, notes) VALUES (?, ?, ?, ?, ?)",
+                ("My Shooting Session #1", "Top of Key 3", "Right", now, ""),
+            )
+            conn.commit()
+        conn.close()
+    except Exception:
+        # On read-only serverless filesystems when Supabase is not yet set
+        pass
 
 
 def compute_form_score(
@@ -129,11 +190,38 @@ def on_startup():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "engine": "FastAPI Biomechanics Analytics v1.0"}
+    return {
+        "status": "ok",
+        "storage": "Supabase PostgreSQL" if USE_SUPABASE else "Local SQLite",
+        "engine": "FastAPI Biomechanics Analytics v1.0",
+    }
 
 
 @app.get("/api/sessions")
 def list_sessions():
+    if USE_SUPABASE:
+        sessions = supabase_request("GET", "sessions?select=*&order=id.desc")
+        all_shots = supabase_request("GET", "shots?select=*&order=id.asc")
+        shots_by_session: Dict[int, List[Dict[str, Any]]] = {}
+        for sh in all_shots:
+            shots_by_session.setdefault(sh["session_id"], []).append(sh)
+
+        for s in sessions:
+            shots = shots_by_session.get(s["id"], [])
+            total = len(shots)
+            makes = sum(1 for sh in shots if sh["made"] == 1)
+            s["total_shots"] = total
+            s["makes"] = makes
+            s["misses"] = total - makes
+            s["fg_pct"] = round((makes / total) * 100, 1) if total > 0 else 0.0
+            s["avg_form_score"] = (
+                round(sum(sh["form_score"] or 0 for sh in shots) / total, 1)
+                if total > 0
+                else 0.0
+            )
+            s["shots"] = shots
+        return sessions
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM sessions ORDER BY id DESC")
@@ -159,9 +247,36 @@ def list_sessions():
 
 @app.post("/api/sessions")
 def create_session(payload: SessionCreate):
+    now = datetime.utcnow().isoformat()
+    if USE_SUPABASE:
+        created = supabase_request(
+            "POST",
+            "sessions",
+            {
+                "title": payload.title,
+                "court_zone_default": payload.court_zone_default,
+                "shooting_hand": payload.shooting_hand,
+                "notes": payload.notes,
+            },
+        )
+        row = created[0] if isinstance(created, list) and created else {"id": 1}
+        return {
+            "id": row["id"],
+            "title": payload.title,
+            "court_zone_default": payload.court_zone_default,
+            "shooting_hand": payload.shooting_hand,
+            "created_at": row.get("created_at", now),
+            "notes": payload.notes,
+            "total_shots": 0,
+            "makes": 0,
+            "misses": 0,
+            "fg_pct": 0.0,
+            "avg_form_score": 0.0,
+            "shots": [],
+        }
+
     conn = get_db()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat()
     cur.execute(
         "INSERT INTO sessions (title, court_zone_default, shooting_hand, created_at, notes) VALUES (?, ?, ?, ?, ?)",
         (payload.title, payload.court_zone_default, payload.shooting_hand, now, payload.notes),
@@ -187,13 +302,6 @@ def create_session(payload: SessionCreate):
 
 @app.post("/api/sessions/{session_id}/shots")
 def log_shot(session_id: int, payload: ShotCreate):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
-    if not cur.fetchone():
-        conn.close()
-        raise HTTPException(status_code=404, detail="Session not found")
-
     now = datetime.utcnow().isoformat()
     form_score = compute_form_score(
         payload.elbow_angle,
@@ -201,6 +309,43 @@ def log_shot(session_id: int, payload: ShotCreate):
         payload.knee_angle,
         payload.follow_through_ms,
     )
+
+    if USE_SUPABASE:
+        created = supabase_request(
+            "POST",
+            "shots",
+            {
+                "session_id": session_id,
+                "made": 1 if payload.made else 0,
+                "court_zone": payload.court_zone,
+                "elbow_angle": payload.elbow_angle,
+                "release_angle": payload.release_angle,
+                "knee_angle": payload.knee_angle,
+                "follow_through_ms": payload.follow_through_ms,
+                "form_score": form_score,
+            },
+        )
+        row = created[0] if isinstance(created, list) and created else {}
+        return {
+            "id": row.get("id", 1),
+            "session_id": session_id,
+            "made": 1 if payload.made else 0,
+            "court_zone": payload.court_zone,
+            "elbow_angle": payload.elbow_angle,
+            "release_angle": payload.release_angle,
+            "knee_angle": payload.knee_angle,
+            "follow_through_ms": payload.follow_through_ms,
+            "form_score": form_score,
+            "created_at": row.get("created_at", now),
+        }
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+    if not cur.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Session not found")
+
     cur.execute(
         """
         INSERT INTO shots (session_id, made, court_zone, elbow_angle, release_angle, knee_angle, follow_through_ms, form_score, created_at)
@@ -237,6 +382,10 @@ def log_shot(session_id: int, payload: ShotCreate):
 
 @app.delete("/api/shots/{shot_id}")
 def delete_shot(shot_id: int):
+    if USE_SUPABASE:
+        supabase_request("DELETE", f"shots?id=eq.{shot_id}")
+        return {"deleted": shot_id}
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM shots WHERE id = ?", (shot_id,))
@@ -247,6 +396,21 @@ def delete_shot(shot_id: int):
 
 @app.post("/api/reset")
 def reset_all_data():
+    if USE_SUPABASE:
+        supabase_request("DELETE", "shots?id=gt.0")
+        supabase_request("DELETE", "sessions?id=gt.0")
+        supabase_request(
+            "POST",
+            "sessions",
+            {
+                "title": "My Shooting Session #1",
+                "court_zone_default": "Top of Key 3",
+                "shooting_hand": "Right",
+                "notes": "",
+            },
+        )
+        return {"status": "reset_complete"}
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM shots")
@@ -268,14 +432,22 @@ def avg_metric(shots: List[Dict[str, Any]], key: str) -> Optional[float]:
 
 @app.get("/api/analytics/summary")
 def get_analytics_summary(session_id: Optional[int] = None):
-    conn = get_db()
-    cur = conn.cursor()
-    if session_id:
-        cur.execute("SELECT * FROM shots WHERE session_id = ? ORDER BY id ASC", (session_id,))
+    if USE_SUPABASE:
+        if session_id:
+            shots = supabase_request(
+                "GET", f"shots?session_id=eq.{session_id}&select=*&order=id.asc"
+            )
+        else:
+            shots = supabase_request("GET", "shots?select=*&order=id.asc")
     else:
-        cur.execute("SELECT * FROM shots ORDER BY id ASC")
-    shots = [dict(r) for r in cur.fetchall()]
-    conn.close()
+        conn = get_db()
+        cur = conn.cursor()
+        if session_id:
+            cur.execute("SELECT * FROM shots WHERE session_id = ? ORDER BY id ASC", (session_id,))
+        else:
+            cur.execute("SELECT * FROM shots ORDER BY id ASC")
+        shots = [dict(r) for r in cur.fetchall()]
+        conn.close()
 
     total = len(shots)
     makes_list = [s for s in shots if s["made"] == 1]
@@ -381,5 +553,3 @@ if FRONTEND_DIST.exists():
         if full_path and candidate.exists() and candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(str(FRONTEND_DIST / "index.html"))
-
-
