@@ -1,0 +1,10 @@
+# Ignore local dependencies and virtual environments during Docker build
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+backend/shots.db
+frontend/dist
+.git
+.gitignore
+

@@ -1,0 +1,20 @@
+# Dependencies & Virtual Environments
+node_modules/
+frontend/node_modules/
+backend/.venv/
+.venv/
+
+# Build outputs
+frontend/dist/
+__pycache__/
+*.py[cod]
+
+# Local SQLite database
+backend/shots.db
+*.db
+
+# Environment & OS files
+.env
+.DS_Store
+Thumbs.db
+
