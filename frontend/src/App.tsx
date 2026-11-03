@@ -54,6 +54,7 @@ export function App() {
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
   const [newSessionTitle, setNewSessionTitle] = useState<string>('');
   const [showNewSessionModal, setShowNewSessionModal] = useState<boolean>(false);
+  const [mobileTab, setMobileTab] = useState<'camera' | 'court' | 'analytics' | 'all'>('all');
 
   const fetchAllData = useCallback(async (sessionId?: number | null) => {
     try {
@@ -169,34 +170,48 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-20 lg:pb-0">
       {/* Header Navigation */}
       <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-500/25">
-              <Activity className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-extrabold tracking-tight text-white">
-                  HoopsVision <span className="text-orange-500">AI</span>
-                </h1>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/30 font-semibold">
-                  Hybrid MediaPipe + FastAPI
-                </span>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3.5 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-500/25 shrink-0">
+                <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
-              <p className="text-xs text-slate-400">
-                Real-Time 60FPS Pose Biomechanics, Auto Shot Counter & Game Analytics
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-white">
+                    HoopsVision <span className="text-orange-500">AI</span>
+                  </h1>
+                  <span className="hidden xs:inline-block text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/30 font-semibold">
+                    Hybrid AI
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-400 line-clamp-1">
+                  60FPS Pose Biomechanics, Shot Counter & Analytics
+                </p>
+              </div>
+            </div>
+
+            {/* Mobile API status dot */}
+            <div className="flex sm:hidden items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  backendConnected ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              <span className="text-slate-300 font-medium">
+                {backendConnected ? 'DB Online' : 'Syncing'}
+              </span>
             </div>
           </div>
 
           {/* Session Switcher & Backend Status */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
               <Server className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-slate-400">Python API:</span>
+              <span className="text-slate-400">API:</span>
               <span
                 className={`font-semibold ${
                   backendConnected ? 'text-emerald-400' : 'text-amber-400'
@@ -213,7 +228,7 @@ export function App() {
                   e.target.value === 'all' ? null : Number(e.target.value)
                 )
               }
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-orange-500"
+              className="flex-1 sm:flex-initial min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-orange-500"
             >
               <option value="all">📊 All Sessions Combined</option>
               {sessions.map((s) => (
@@ -225,17 +240,17 @@ export function App() {
 
             <button
               onClick={() => setShowNewSessionModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold transition shadow-sm shadow-orange-500/20"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold transition shadow-sm shadow-orange-500/20"
             >
-              <PlusCircle className="w-3.5 h-3.5" /> New Session
+              <PlusCircle className="w-3.5 h-3.5" /> New
             </button>
 
             <button
               onClick={handleResetAll}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-600/80 text-slate-300 hover:text-white text-xs font-semibold border border-slate-700 transition"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-600/80 text-slate-300 hover:text-white text-xs font-semibold border border-slate-700 transition"
               title="Reset all shots and sessions to 0"
             >
-              Reset Data
+              Reset
             </button>
           </div>
         </div>
@@ -282,35 +297,53 @@ export function App() {
       )}
 
       {/* Main Content Split View: Left = Live Vision + Court Map, Right = Python Analytics */}
-      <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-        {/* Left Column: Live Camera Vision + Court Selector (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-orange-400">
-            <Video className="w-4 h-4" /> Live AI Camera & Pose Skeleton Feed
+      <main className="max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 flex-1">
+        {/* Left Column: Live Camera Vision + Court Selector (7 cols on Desktop) */}
+        <div
+          className={`lg:col-span-7 space-y-5 sm:space-y-6 ${
+            mobileTab === 'analytics' ? 'hidden lg:block' : 'block'
+          }`}
+        >
+          <div
+            className={
+              mobileTab === 'court' ? 'hidden lg:block space-y-3' : 'block space-y-3'
+            }
+          >
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-orange-400">
+              <Video className="w-4 h-4" /> Live AI Camera & Pose Skeleton Feed
+            </div>
+
+            <LiveCameraTracker
+              shootingHand={shootingHand}
+              onChangeHand={setShootingHand}
+              selectedZone={selectedZone}
+              onLogShot={handleLogShot}
+              sessionStats={{
+                total: summary.total_shots,
+                makes: summary.makes,
+                misses: summary.misses,
+                fg_pct: summary.fg_pct,
+              }}
+            />
           </div>
 
-          <LiveCameraTracker
-            shootingHand={shootingHand}
-            onChangeHand={setShootingHand}
-            selectedZone={selectedZone}
-            onLogShot={handleLogShot}
-            sessionStats={{
-              total: summary.total_shots,
-              makes: summary.makes,
-              misses: summary.misses,
-              fg_pct: summary.fg_pct,
-            }}
-          />
-
-          <CourtMap
-            selectedZone={selectedZone}
-            onSelectZone={setSelectedZone}
-            zoneStats={summary.zones}
-          />
+          <div className={mobileTab === 'camera' ? 'hidden lg:block' : 'block'}>
+            <CourtMap
+              selectedZone={selectedZone}
+              onSelectZone={setSelectedZone}
+              zoneStats={summary.zones}
+            />
+          </div>
         </div>
 
-        {/* Right Column: Analytics Dashboard & Make/Miss Biomechanics (5 cols) */}
-        <div className="lg:col-span-5 space-y-6">
+        {/* Right Column: Analytics Dashboard & Make/Miss Biomechanics (5 cols on Desktop) */}
+        <div
+          className={`lg:col-span-5 space-y-4 sm:space-y-6 ${
+            mobileTab === 'camera' || mobileTab === 'court'
+              ? 'hidden lg:block'
+              : 'block'
+          }`}
+        >
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-400">
             <BarChart3 className="w-4 h-4" /> Shooting Analytics & Form Telemetry
           </div>
@@ -321,6 +354,50 @@ export function App() {
           />
         </div>
       </main>
+
+      {/* Sticky Mobile Bottom Navigation Bar (Visible on Phones & Tablets < lg) */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 px-2 py-1.5 grid grid-cols-4 gap-1">
+        <button
+          onClick={() => setMobileTab('all')}
+          className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[11px] font-semibold transition ${
+            mobileTab === 'all'
+              ? 'bg-orange-500/20 text-orange-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <span>🏀 All</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('camera')}
+          className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[11px] font-semibold transition ${
+            mobileTab === 'camera'
+              ? 'bg-orange-500/20 text-orange-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <span>🎥 Camera</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('court')}
+          className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[11px] font-semibold transition ${
+            mobileTab === 'court'
+              ? 'bg-orange-500/20 text-orange-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <span>🗺️ Court</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('analytics')}
+          className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[11px] font-semibold transition ${
+            mobileTab === 'analytics'
+              ? 'bg-orange-500/20 text-orange-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <span>📊 Stats</span>
+        </button>
+      </nav>
     </div>
   );
 }

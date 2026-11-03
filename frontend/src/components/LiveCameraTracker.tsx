@@ -64,6 +64,7 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
 
   const [feedMode, setFeedMode] = useState<FeedMode>('idle');
   const [cameraActive, setCameraActive] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [voiceActive, setVoiceActive] = useState(false);
   const [autoDetectEnabled, setAutoDetectEnabled] = useState(true);
@@ -657,28 +658,12 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
               ankle,
             });
           } else {
-            // Standby / Idle Mode (No active feed yet)
+            // Standby / Idle Mode background gradient (HTML overlay handles responsive text)
             const grad = ctx.createLinearGradient(0, 0, 0, height);
             grad.addColorStop(0, '#0f172a');
             grad.addColorStop(1, '#020617');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, width, height);
-
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '600 16px Inter, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(
-              'Camera Standby — Click "Start Live Camera" or "Upload Clip" above to begin tracking',
-              width / 2,
-              height / 2
-            );
-            ctx.font = '400 13px Inter, sans-serif';
-            ctx.fillStyle = '#64748b';
-            ctx.fillText(
-              '(Or click "AI Pose Simulator" to test automatic shot detection without a camera)',
-              width / 2,
-              height / 2 + 26
-            );
           }
         }
       }
@@ -693,6 +678,34 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
     };
   }, [feedMode, shootingHand, evaluatePoseBiomechanics, drawBiomechanicsHUD]);
 
+  const startCameraWithFacing = async (mode: 'user' | 'environment') => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const oldStream = videoRef.current.srcObject as MediaStream;
+      oldStream.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: mode },
+        audio: false,
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setCameraActive(true);
+        setFacingMode(mode);
+        setFeedMode('camera');
+        showToast(
+          `🎥 ${mode === 'environment' ? 'Rear' : 'Front'} Camera Active — Step back so your body is in frame`
+        );
+      }
+    } catch (err) {
+      console.error('Camera access error:', err);
+      showToast('Could not access camera. Check browser camera permissions.');
+      setFeedMode('idle');
+    }
+  };
+
   // Start / Stop Live Camera
   const toggleCamera = async () => {
     if (cameraActive) {
@@ -706,23 +719,14 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
       setLiveAngles({ elbow: null, release: null, knee: null });
       return;
     }
+    await startCameraWithFacing(facingMode);
+  };
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-        audio: false,
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setCameraActive(true);
-        setFeedMode('camera');
-        showToast('🎥 Live Camera Active — Step back so your upper body & knees are visible');
-      }
-    } catch (err) {
-      console.error('Camera access error:', err);
-      showToast('Could not access camera. Check browser camera permissions.');
-      setFeedMode('idle');
+  const flipCamera = async () => {
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    if (cameraActive) {
+      await startCameraWithFacing(nextMode);
     }
   };
 
@@ -745,13 +749,13 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Top Camera Controls Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2.5 bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-3.5">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
           <button
             onClick={toggleCamera}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
+            className={`col-span-2 sm:col-span-1 flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl text-sm font-semibold transition ${
               cameraActive
                 ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/25'
                 : 'bg-orange-500 hover:bg-orange-400 text-white shadow-lg shadow-orange-500/25'
@@ -759,13 +763,22 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
           >
             {cameraActive ? (
               <>
-                <CameraOff className="w-4 h-4" /> Stop Live Camera
+                <CameraOff className="w-4 h-4" /> Stop Camera
               </>
             ) : (
               <>
                 <Camera className="w-4 h-4" /> Start Live Camera
               </>
             )}
+          </button>
+
+          <button
+            onClick={flipCamera}
+            title="Switch between Front (Selfie) and Rear Camera on mobile"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-orange-400" />
+            <span>{facingMode === 'user' ? 'Front Cam' : 'Rear Cam'}</span>
           </button>
 
           <button
@@ -779,16 +792,17 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
                 setFeedMode('simulator');
               }
             }}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+            className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition ${
               feedMode === 'simulator'
                 ? 'bg-sky-500/20 border-sky-500/60 text-sky-300'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5" /> {feedMode === 'simulator' ? 'Stop Simulator' : 'AI Pose Simulator'}
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{feedMode === 'simulator' ? 'Stop Sim' : 'Simulator'}</span>
           </button>
 
-          <label className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition">
+          <label className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition">
             <Upload className="w-3.5 h-3.5" /> Upload Clip
             <input
               type="file"
@@ -800,11 +814,11 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
         </div>
 
         {/* Right Controls: Voice, Handedness, Model Badge */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
           <button
             onClick={() => setVoiceActive((v) => !v)}
             title="Say 'Make'/'Swish' or 'Miss' hands-free while shooting"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition ${
               voiceActive
                 ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
                 : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
@@ -812,32 +826,75 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
           >
             {voiceActive ? (
               <>
-                <Mic className="w-3.5 h-3.5 animate-pulse text-emerald-400" /> Voice On ("Make"/"Miss")
+                <Mic className="w-3.5 h-3.5 animate-pulse text-emerald-400" /> Voice On
               </>
             ) : (
               <>
-                <MicOff className="w-3.5 h-3.5" /> Voice Commands
+                <MicOff className="w-3.5 h-3.5" /> Voice
               </>
             )}
           </button>
 
           <button
             onClick={() => onChangeHand(shootingHand === 'Right' ? 'Left' : 'Right')}
-            className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700"
+            className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700"
           >
             Hand: <span className="text-orange-400 font-bold">{shootingHand}</span>
           </button>
 
           <span
-            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${
+            className={`px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-semibold flex items-center gap-1.5 ${
               modelStatus === 'ready'
                 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                 : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-current animate-ping" />
-            {modelStatus === 'ready' ? 'MediaPipe 60FPS Ready' : 'Loading Vision AI...'}
+            {modelStatus === 'ready' ? '60FPS AI Ready' : 'Loading AI...'}
           </span>
+        </div>
+      </div>
+
+      {/* Mobile Compact Telemetry Strip (prevents overlapping video on phones) */}
+      <div className="grid grid-cols-5 gap-1.5 sm:hidden bg-slate-900/95 border border-slate-800 rounded-xl p-2 text-center">
+        <div className="col-span-2 border-r border-slate-800 pr-1 flex flex-col justify-center">
+          <div className="text-[9px] uppercase text-slate-400">Session FG</div>
+          <div className="text-sm font-extrabold text-white">
+            {sessionStats.makes}/{sessionStats.total}{' '}
+            <span className="text-xs text-orange-400">({sessionStats.fg_pct}%)</span>
+          </div>
+          <div
+            className={`text-[9px] font-bold uppercase ${
+              shotPhase === 'RELEASED'
+                ? 'text-emerald-400'
+                : shotPhase === 'LOADING'
+                ? 'text-amber-400'
+                : 'text-sky-400'
+            }`}
+          >
+            ● {shotPhase}
+          </div>
+        </div>
+        <div>
+          <div className="text-[9px] text-slate-400 uppercase">Elbow</div>
+          <div className="text-xs font-bold text-orange-400">
+            {liveAngles.elbow !== null ? `${liveAngles.elbow}°` : '--'}
+          </div>
+          <div className="text-[8px] text-slate-500">90° ideal</div>
+        </div>
+        <div>
+          <div className="text-[9px] text-slate-400 uppercase">Arc</div>
+          <div className="text-xs font-bold text-emerald-400">
+            {liveAngles.release !== null ? `${liveAngles.release}°` : '--'}
+          </div>
+          <div className="text-[8px] text-slate-500">55° ideal</div>
+        </div>
+        <div>
+          <div className="text-[9px] text-slate-400 uppercase">Knee</div>
+          <div className="text-xs font-bold text-sky-400">
+            {liveAngles.knee !== null ? `${liveAngles.knee}°` : '--'}
+          </div>
+          <div className="text-[8px] text-slate-500">118° ideal</div>
         </div>
       </div>
 
@@ -848,11 +905,28 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
           ref={canvasRef}
           width={800}
           height={460}
-          className="w-full h-auto block"
+          className="w-full h-auto min-h-[230px] object-cover block"
         />
 
-        {/* Top-Left Live HUD: Shot Counter & Zone */}
-        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2">
+        {/* Responsive Standby Overlay when camera is idle */}
+        {feedMode === 'idle' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-5 text-center bg-slate-950/60 backdrop-blur-[2px]">
+            <button
+              onClick={toggleCamera}
+              className="mb-3 px-5 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm shadow-lg shadow-orange-500/30 flex items-center gap-2 active:scale-95 transition"
+            >
+              <Camera className="w-4 h-4" /> Tap to Start Live Camera
+            </button>
+            <p className="text-xs sm:text-sm font-medium text-slate-300 max-w-md">
+              Prop your phone or laptop so your body is in frame, or tap{' '}
+              <span className="text-sky-400 font-semibold">Simulator</span> /{' '}
+              <span className="text-slate-200 font-semibold">Upload Clip</span> above.
+            </p>
+          </div>
+        )}
+
+        {/* Desktop Floating Top-Left HUD (hidden on small phones where strip is shown) */}
+        <div className="hidden sm:flex absolute top-3 left-3 flex-wrap items-center gap-2">
           <div className="bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2 flex items-center gap-4">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-slate-400">
@@ -885,8 +959,8 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
           </div>
         </div>
 
-        {/* Top-Right Live Angles Telemetry */}
-        <div className="absolute top-3 right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2 grid grid-cols-3 gap-3 text-center">
+        {/* Desktop Floating Top-Right Live Angles Telemetry */}
+        <div className="hidden sm:grid absolute top-3 right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2 grid-cols-3 gap-3 text-center">
           <div>
             <div className="text-[10px] text-slate-400 uppercase">Elbow</div>
             <div className="text-sm font-bold text-orange-400">
@@ -912,49 +986,49 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
 
         {/* Toast Notification */}
         {statusToast && (
-          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-orange-500/50 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-xl flex items-center gap-2">
-            <Volume2 className="w-3.5 h-3.5 text-orange-400" />
-            {statusToast}
+          <div className="absolute bottom-14 sm:bottom-16 left-2 right-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 bg-slate-900/95 border border-orange-500/50 text-white px-3.5 py-2 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-semibold shadow-xl flex items-center justify-center gap-2 text-center">
+            <Volume2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+            <span className="truncate">{statusToast}</span>
           </div>
         )}
 
         {/* Auto-Detected Shot Banner */}
         {pendingShotAlert && (
-          <div className="absolute bottom-3 left-3 right-3 bg-slate-900/95 backdrop-blur-md border border-orange-500/60 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 animate-fade-in">
-            <div className="flex items-center gap-2.5">
-              <Activity className="w-5 h-5 text-orange-400" />
+          <div className="absolute bottom-2 left-2 right-2 sm:bottom-3 sm:left-3 sm:right-3 bg-slate-900/95 backdrop-blur-md border border-orange-500/60 rounded-xl p-2.5 sm:p-3 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2.5 animate-fade-in">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400 shrink-0" />
               <div>
                 <div className="text-xs font-bold text-white">
                   Shot Release Detected! ({selectedZone})
                 </div>
-                <div className="text-[11px] text-slate-300">
-                  Captured Set Elbow:{' '}
+                <div className="text-[10px] sm:text-[11px] text-slate-300">
+                  Elbow:{' '}
                   <span className="text-orange-400 font-semibold">
                     {lastCapturedBio.elbow_angle}°
                   </span>{' '}
-                  • Release Arc:{' '}
+                  • Arc:{' '}
                   <span className="text-emerald-400 font-semibold">
                     {lastCapturedBio.release_angle}°
                   </span>{' '}
-                  • Knee Load:{' '}
+                  • Knee:{' '}
                   <span className="text-sky-400 font-semibold">
                     {lastCapturedBio.knee_angle}°
                   </span>
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-2 sm:flex items-center gap-2">
               <button
                 onClick={() => handleRecordOutcome(true)}
-                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1"
+                className="justify-center px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" /> Log Make (M)
+                <CheckCircle2 className="w-3.5 h-3.5" /> Make
               </button>
               <button
                 onClick={() => handleRecordOutcome(false)}
-                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1"
+                className="justify-center px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1"
               >
-                <XCircle className="w-3.5 h-3.5" /> Log Miss (X)
+                <XCircle className="w-3.5 h-3.5" /> Miss
               </button>
             </div>
           </div>
@@ -962,21 +1036,21 @@ export const LiveCameraTracker: React.FC<LiveCameraTrackerProps> = ({
       </div>
 
       {/* Big Court-Side Make / Miss Action Buttons */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
         <button
           onClick={() => handleRecordOutcome(true)}
-          className="flex items-center justify-center gap-3 py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-base shadow-lg shadow-emerald-900/30 active:scale-[0.99] transition"
+          className="flex items-center justify-center gap-2 sm:gap-3 py-3.5 sm:py-4 px-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/30 active:scale-[0.98] transition"
         >
-          <CheckCircle2 className="w-6 h-6" />
-          <span>MADE SHOT (Press M)</span>
+          <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+          <span>MADE SHOT</span>
         </button>
 
         <button
           onClick={() => handleRecordOutcome(false)}
-          className="flex items-center justify-center gap-3 py-4 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold text-base shadow-lg shadow-rose-900/30 active:scale-[0.99] transition"
+          className="flex items-center justify-center gap-2 sm:gap-3 py-3.5 sm:py-4 px-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold text-sm sm:text-base shadow-lg shadow-rose-900/30 active:scale-[0.98] transition"
         >
-          <XCircle className="w-6 h-6" />
-          <span>MISSED SHOT (Press X)</span>
+          <XCircle className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+          <span>MISSED SHOT</span>
         </button>
       </div>
     </div>
